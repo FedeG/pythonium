@@ -1,12 +1,7 @@
 import logging
 import sys
-from collections import defaultdict
-from itertools import groupby
-
-import numpy as np
 
 from . import cfg
-from .explosion import Explosion
 from .orders import galaxy as galaxy_orders
 from .orders import planet as planet_orders
 from .orders import ship as ship_orders
@@ -21,9 +16,9 @@ class Game:
         name,
         players,
         gmode,
+        orders_extractor,
         *,
         renderer=GifRenderer,
-        raise_exceptions=False,
     ):
         """
         :param name: Name for the galaxy. Also used as game identifier.
@@ -34,9 +29,6 @@ class Game:
         :param gmode: Class that define some game rules
         :type gmode: :class:GameMode
         :param renderer: Instance that renders the game on each turn
-        :param raise_exceptions: If ``True`` stop the game if an exception is raised when
-            computing player actions. Useful for debuging players.
-        :type raise_exceptions: bool
         """
         if len(players) != len({p.name for p in players}):
             raise ValueError("Player names must be unique")
@@ -44,7 +36,6 @@ class Game:
         sys.stdout.write("** Pythonium **\n")
         self.gmode = gmode
         self.players = players
-        self.raise_exceptions = raise_exceptions
         logger.info(
             "Initializing galaxy",
             extra={"players": len(self.players), "galaxy_name": name},
@@ -53,42 +44,7 @@ class Game:
         logger.info("Galaxy initialized")
         sys.stdout.write(f"Running battle in galaxy #{name}\n")
         self._renderer = renderer(self.galaxy, f"Galaxy #{name}")
-
-    def extract_player_orders(self, player, galaxy, context):
-        player_galaxy = player.next_turn(galaxy, context)
-
-        # The function must return the mutated galaxy
-
-        if id(galaxy) != id(player_galaxy):
-            raise ValueError(
-                "The `run_player` method must return a mutated galaxy"
-            )
-
-        planets_orders = [
-            p.get_orders()
-            for p in player_galaxy.planets.values()
-            if p.player == player.name
-        ]
-        ships_orders = [
-            s.get_orders()
-            for s in player_galaxy.ships
-            if s.player == player.name
-        ]
-
-        orders = [
-            o for orders in ships_orders + planets_orders for o in orders
-        ]
-        logger.info(
-            "Player orders computed",
-            extra={
-                "turn": self.galaxy.turn,
-                "player": player.name,
-                "orders": len(orders),
-            },
-        )
-
-        grouped_actions = groupby(orders, lambda o: o[0])
-        return grouped_actions
+        self._extract_orders = orders_extractor
 
     def play(self):
         while True:
@@ -97,94 +53,52 @@ class Game:
             sys.stdout.flush()
 
             logger.info("Turn started", extra={"turn": self.galaxy.turn})
-            orders = defaultdict(lambda: [])
+
             context = self.gmode.get_context(
                 self.galaxy, self.players, self.galaxy.turn
             )
-
-            # Should I record the state?
-            if self._renderer:
-                self._renderer.render_frame(context)
+            # Renders the game state
+            self._renderer.render_frame(context)
 
             # log current score
             for player_score in context["score"]:
                 logger.info("Current score", extra=player_score)
 
-            for player in self.players:
-                # Filtra cosas que ve el player según las reglas del juego
-                galaxy = self.gmode.galaxy_for_player(self.galaxy, player)
-                try:
-                    logger.info(
-                        "Computing orders for player",
-                        extra={
-                            "turn": self.galaxy.turn,
-                            "player": player.name,
-                        },
-                    )
-
-                    player_orders = self.extract_player_orders(
-                        player, galaxy, context
-                    )
-                    for name, player_orders in player_orders:
-                        for order in player_orders:
-                            orders[name].append((player, order[1:]))
-
-                except Exception as e:
-                    logger.error(
-                        "Player lost turn",
-                        extra={
-                            "turn": self.galaxy.turn,
-                            "player": player.name,
-                            "reason": str(e),
-                        },
-                    )
-                    logger.info(
-                        "Player orders computed",
-                        extra={
-                            "turn": self.galaxy.turn,
-                            "player": player.name,
-                            "orders": 0,
-                        },
-                    )
-                    if self.raise_exceptions:
-                        raise e
-                    continue
+            orders = self._extract_orders(
+                players=self.players,
+                context=context,
+                galaxy=self.galaxy,
+            )
 
             if self.gmode.has_ended(self.galaxy, self.galaxy.turn):
-                if self.gmode.winner:
-                    logger.info(
-                        "Winner!",
-                        extra={
-                            "turn": self.galaxy.turn,
-                            "winner": self.gmode.winner,
-                        },
-                    )
-                    message = f"Player {self.gmode.winner} wins\n"
-                else:
-                    logger.info("Nobody won", extra={"turn": self.galaxy.turn})
-                    message = "Nobody won\n"
-
-                sys.stdout.write("\n")
-                sys.stdout.write(message)
-
-                if self._renderer:
-                    # Render last frame
-                    context = self.gmode.get_context(
-                        self.galaxy, self.players, self.galaxy.turn
-                    )
-                    self._renderer.render_frame(context)
-                    # Save as gif
-                    self._renderer.save_gif(f"{self.galaxy.name}.gif")
+                self.end_game()
                 break
-
-            # Reset explosions
-            self.galaxy.explosions = []
-
-            # Sort orders by object id
-            for o in orders.values():
-                o.sort(key=lambda x: x[1][0])
-
             self.run_turn(orders)
+
+    def end_game(self):
+        if self.gmode.winner:
+            logger.info(
+                "Winner!",
+                extra={
+                    "turn": self.galaxy.turn,
+                    "winner": self.gmode.winner,
+                },
+            )
+            message = f"Player {self.gmode.winner} wins\n"
+        else:
+            logger.info("Nobody won", extra={"turn": self.galaxy.turn})
+            message = "Nobody won\n"
+
+        sys.stdout.write("\n")
+        sys.stdout.write(message)
+
+        # Render last frame
+        context = self.gmode.get_context(
+            self.galaxy, self.players, self.galaxy.turn
+        )
+        self._renderer.render_frame(context)
+        # Save as gif
+        self._renderer.save_gif(f"{self.galaxy.name}.gif")
 
     def run_turn(self, orders):
         """
@@ -202,6 +116,8 @@ class Game:
         11. Taxes recollection
         12. Pythonium extraction
         """
+        # Reset explosions
+        self.galaxy.explosions = []
         # 1. Ships download transfers
         # 2. Ships upload transfers
         self.run_player_action(

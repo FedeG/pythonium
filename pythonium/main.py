@@ -11,6 +11,7 @@ from .game_modes import ClassicMode
 from .helpers import random_name
 from .logger import setup_logger
 from .metrics_collector import MetricsCollector
+from .orders.extractor import OrdersExtractor
 
 HELP_EPILOG = "A space strategy algorithmic-game build in python"
 
@@ -55,6 +56,7 @@ def go():
 
     game_mode = ClassicMode()
     galaxy_name = random_name(6)
+    orders_extractor = OrdersExtractor(game_mode, args.raise_exceptions)
 
     logfile = Path.cwd() / f"{galaxy_name}.log"
     setup_logger(logfile, verbose=args.verbose)
@@ -69,7 +71,7 @@ def go():
         name=galaxy_name,
         players=players,
         gmode=game_mode,
-        raise_exceptions=args.raise_exceptions,
+        orders_extractor=orders_extractor,
     )
     game.play()
 
