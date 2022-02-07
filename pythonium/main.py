@@ -70,7 +70,7 @@ def go():
     game = Game(
         name=galaxy_name,
         players=players,
-        gmode=game_mode,
+        game_mode=game_mode,
         orders_extractor=orders_extractor,
     )
     game.play()

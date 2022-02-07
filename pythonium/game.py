@@ -15,7 +15,7 @@ class Game:
         self,
         name,
         players,
-        gmode,
+        game_mode,
         orders_extractor,
         *,
         renderer=GifRenderer,
@@ -26,21 +26,21 @@ class Game:
         :param players: Players for the game. Supports one or two players.
         :type players: list of instances of classes that extends
             from :class:`AbstractPlayer`
-        :param gmode: Class that define some game rules
-        :type gmode: :class:GameMode
+        :param game_mode: Class that define some game rules
+        :type game_mode: :class:GameMode
         :param renderer: Instance that renders the game on each turn
         """
         if len(players) != len({p.name for p in players}):
             raise ValueError("Player names must be unique")
 
         sys.stdout.write("** Pythonium **\n")
-        self.gmode = gmode
+        self.game_mode = game_mode
         self.players = players
         logger.info(
             "Initializing galaxy",
             extra={"players": len(self.players), "galaxy_name": name},
         )
-        self.galaxy = self.gmode.build_galaxy(name, self.players)
+        self.galaxy = self.game_mode.build_galaxy(name, self.players)
         logger.info("Galaxy initialized")
         sys.stdout.write(f"Running battle in galaxy #{name}\n")
         self._renderer = renderer(self.galaxy, f"Galaxy #{name}")
@@ -54,7 +54,7 @@ class Game:
 
             logger.info("Turn started", extra={"turn": self.galaxy.turn})
 
-            context = self.gmode.get_context(
+            context = self.game_mode.get_context(
                 self.galaxy, self.players, self.galaxy.turn
             )
             # Renders the game state
@@ -70,21 +70,21 @@ class Game:
                 galaxy=self.galaxy,
             )
 
-            if self.gmode.has_ended(self.galaxy, self.galaxy.turn):
+            if self.game_mode.has_ended(self.galaxy, self.galaxy.turn):
                 self.end_game()
                 break
             self.run_turn(orders)
 
     def end_game(self):
-        if self.gmode.winner:
+        if self.game_mode.winner:
             logger.info(
                 "Winner!",
                 extra={
                     "turn": self.galaxy.turn,
-                    "winner": self.gmode.winner,
+                    "winner": self.game_mode.winner,
                 },
             )
-            message = f"Player {self.gmode.winner} wins\n"
+            message = f"Player {self.game_mode.winner} wins\n"
         else:
             logger.info("Nobody won", extra={"turn": self.galaxy.turn})
             message = "Nobody won\n"
@@ -93,7 +93,7 @@ class Game:
         sys.stdout.write(message)
 
         # Render last frame
-        context = self.gmode.get_context(
+        context = self.game_mode.get_context(
             self.galaxy, self.players, self.galaxy.turn
         )
         self._renderer.render_frame(context)
@@ -264,7 +264,7 @@ class Game:
     def action_planet_build_ship(self, planet, ship_type):
 
         ships_count = len(list(self.galaxy.get_player_ships(planet.player)))
-        if ships_count >= self.gmode.max_ships:
+        if ships_count >= self.game_mode.max_ships:
             logger.warning(
                 "Ships limit reached",
                 extra={
